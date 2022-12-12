@@ -15,7 +15,7 @@ import torch.utils.data
 import torch.backends.cudnn
 import torchvision.utils
 import torch.nn.functional as F
-import matlab.engine
+# import matlab.engine
 
 from model.classification_models import simple_FCNet
 
@@ -28,7 +28,7 @@ from baselines_interface.kmpms import run_kmpms
 from baselines_interface.en import run_en
 from baselines_interface.alphamax import run_alphamax
 from baselines_interface.roc import run_roc
-from baselines_interface.dedpul import run_dedpul
+
 from baselines_interface.rpg import run_rankpruning
 def str2bool(s):
     if s.lower() == 'true':
@@ -130,9 +130,10 @@ def train(epoch, model, optimizer, criterion, train_loader):
         loss.backward()
         optimizer.step()
  
-        top1_acc, top2_acc = accuracy(outputs.data, targets.data, topk=(1,2))
+        res = accuracy(outputs.data, targets.data, topk=(1,))
+        top1_acc = res[0]
         top1_acc_meter.update(top1_acc.item(), batch_size)
-        top2_acc_meter.update(top2_acc.item(), batch_size)
+        # top2_acc_meter.update(top2_acc.item(), batch_size)
         ce_loss_meter.update(loss.item(), batch_size)
 
 
@@ -159,9 +160,9 @@ def validate_and_test(epoch, model, criterion, val_loader, optim_config, is_test
         ce_loss = criterion(outputs, targets)
         num = data.size(0)        
         
-        top1_acc, top2_acc = accuracy(outputs.data, targets.data, topk=(1, 2))
+        res = accuracy(outputs.data, targets.data, topk=(1,))
+        top1_acc = res[0]
         top1_acc_meter.update(top1_acc.item(), num)
-        top2_acc_meter.update(top2_acc.item(), num)
         ce_loss_meter.update(ce_loss.item(), num)
 
 
@@ -183,6 +184,7 @@ def accuracy(output, target, topk=(1,)):
     correct = pred.eq(target.view(1, -1).expand_as(pred))
 
     res = []
+
     for k in topk:
         correct_k = correct[:k].view(-1).float().sum(0)
         res.append(correct_k.mul_(100.0 / batch_size))
@@ -296,6 +298,7 @@ def main():
     global global_step
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"{device=}")
 
     #configs 
     config = parse_args()
@@ -308,6 +311,7 @@ def main():
     # we select $\{0.25, 0.5, 0.75\}$ fraction of 
     # either positive (or negative) examples to be the sample of the positive distribution $P_p$. 
     # We let the rest of the examples to be the sample of the unlabeled distribution $P_x$.
+    print(f"{run_config=}")
     for positive_frac in run_config['positive_fracs']:
         # for each sample size, $10$ repeated experiments are carried out with random sampling.
         for repeat_times in range(run_config['num_random_experiments']):
@@ -327,6 +331,8 @@ def main():
                 outdir = run_config['outdir']
                 print("")
                 print("___________________________________\n")
+                print(f"{run_config=}")
+
                 # create output directory
                 create_dir(run_config['outdir'])
 
@@ -376,7 +382,7 @@ def main():
                     
                         model_path = os.path.join(outdir, 'model_state.pth')
                         torch.save(state, model_path)
-                        if (top1_acc_avg > best_top1_acc):
+                        if (top1_acc_avg >= best_top1_acc):
                             best_model_path = os.path.join(outdir, 'model_best.pth')
                             shutil.copyfile(model_path, best_model_path)
                             best_top1_acc = top1_acc_avg
@@ -423,7 +429,7 @@ def runALGS(tr_unlabeled_sample, tr_positive_sample, outdir, class_prior, relabe
     KM2 = 1
     RKM2 = 1
 
-    eng.clearM(nargout=0)
+    # eng.clearM(nargout=0)
     saved_dict = torch.load(outdir+'/model_best.pth')
     print("top1-accuracy:", saved_dict["top1-accuracy"])
     model.load_state_dict(saved_dict["state_dict"])
@@ -434,35 +440,6 @@ def runALGS(tr_unlabeled_sample, tr_positive_sample, outdir, class_prior, relabe
     tr_positive_sample = np.array(tr_positive_sample)[:,:-1].tolist()
     estimated_set_A = [ tr_unlabeled_sample[idx] for idx in min_f_idxs ]
 
-
-    # #run alphamax (AM) and regrouping-alphamax (RAM)
-    # AM = run_alphamax(eng,x=tr_unlabeled_sample,x1=tr_positive_sample)
-    # RAM = run_alphamax(eng,x=tr_unlabeled_sample,x1=tr_positive_sample+estimated_set_A)
-    # error["AM"] += abs(class_prior-AM)
-    # print("AM_estimate= "+str(AM))
-    # error["RAM"] += abs(class_prior-RAM)
-    # print("RAM_estimate= "+str(RAM))
-    # eng.clearM(nargout=0)
-
-    # #run ROC  and regrouping-ROC (RROC)
-    # ROC = run_roc(eng,x=tr_unlabeled_sample,x1=tr_positive_sample)
-    # RROC = run_roc(eng,x=tr_unlabeled_sample,x1=tr_positive_sample+estimated_set_A)
-    # error["ROC"] += abs(class_prior-ROC)
-    # print("ROC_estimate= "+str(ROC))
-    # error["RROC"] += abs(class_prior-RROC)
-    # print("RROC_estimate= "+str(RROC))
-    # eng.clearM(nargout=0)
-
-    # #run EN and regrouping-EN (REN)
-    # EN = run_en(eng,x=tr_unlabeled_sample,x1=tr_positive_sample)
-    # REN = run_en(eng,x=tr_unlabeled_sample,x1=tr_positive_sample+estimated_set_A)
-    # error["EN"] += abs(class_prior-EN)
-    # print("EN_estimate= "+str(EN))
-    # error["REN"] += abs(class_prior-REN)
-    # print("REN_estimate= "+str(REN))
-    eng.clearM(nargout=0)
-
-    #run KM1, KM2 and regrouping-KM1 (RKM1), regrouping-KM2 (RKM2)
     KM1, KM2 = run_kmpms(tr_unlabeled_sample,tr_positive_sample)
     RKM1, RKM2 = run_kmpms(tr_unlabeled_sample,tr_positive_sample+estimated_set_A)
     
@@ -477,15 +454,6 @@ def runALGS(tr_unlabeled_sample, tr_positive_sample, outdir, class_prior, relabe
     print ("RKM2_estimate= "+str(RKM2))
 
 
-    #run DEDPUL (DPL) and regrouping-DEDPUL (RDPL)
-    DPL = run_dedpul(x=tr_unlabeled_sample,x1=tr_positive_sample)
-    RDPL = run_dedpul(x=tr_unlabeled_sample,x1=tr_positive_sample+estimated_set_A)
-    error["DPL"] += abs(class_prior-DPL)
-    print("DPL_estimate= "+str(DPL))
-    error["RDPL"] += abs(class_prior-RDPL)
-    print("RDPL_estimate= "+str(RDPL))
-
-    #run Rankpruning (RPG) and regrouping-Rankpruning (RRPG)
     RPG = run_rankpruning(x=tr_unlabeled_sample,x1=tr_positive_sample)
     RRPG = run_rankpruning(x=tr_unlabeled_sample,x1=tr_positive_sample+estimated_set_A)
     error["RPG"] += abs(class_prior-RPG)
@@ -493,7 +461,6 @@ def runALGS(tr_unlabeled_sample, tr_positive_sample, outdir, class_prior, relabe
     error["RRPG"] += abs(class_prior-RRPG)
     print("RRPG_estimate= "+str(RRPG))
 
-    
     return error
 
 
@@ -503,8 +470,8 @@ global_step = 0
 best_top1_acc = 0
 best_top2_acc = 0
 
-eng = matlab.engine.start_matlab(background=False)
-eng.cd("./baselines_matlab")
+# eng = matlab.engine.start_matlab(background=False)
+# eng.cd("./baselines_matlab")
 
 if __name__ == '__main__':
     main()
