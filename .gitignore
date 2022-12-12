@@ -1,0 +1,10 @@
+.vscode
+*/__pycache__/
+__pycache__
+*.pt
+.DS_Store
+*.jsons
+*.csv
+.idea
+*.zip
+*.json
